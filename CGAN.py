@@ -14,7 +14,7 @@ import os
 import cv2
 import math
 import numpy as np
-import csv
+import pandas
 
 import matplotlib.pyplot as plt
 
@@ -29,26 +29,14 @@ class CGAN:
         self.latent_size = 100
         self.sample_rows = 2
         self.sample_cols = 2
-        self.sample_path = 'celeba-dataset/small_image_set/'
+        self.sample_path = os.getcwd() + '/celeba-dataset/small_image_set/'
+
+        print(self.sample_path)
         self.num_classes = 40
 
 
         ##########################
-
-        #self.labels = pandas.read_csv('celeba-dataset/small_list_attr_celeba.csv')
-        #print(self.labels)
-        mydict = {rows[0]: rows[1] for rows in reader}
-
-        first_item = []
-        filename = 'celeba-dataset/small_list_attr_celeba.csv'
-        with open(filename, 'r') as input_file:
-            reader = csv.reader(input_file)
-            for line in reader:
-                array = line.split(',')
-                first_item = array[0]
-
-
-        print(first_item)
+        self.land_marks = pandas.read_csv(os.getcwd() + '/celeba-dataset/small_list_attr_celeba.csv', sep=';')
         ##########################
 
         optimizer = RMSprop(lr=0.0008, clipvalue=1.0, decay=6e-8)
@@ -127,7 +115,7 @@ class CGAN:
         model.summary()
 
         noise = Input(shape=(seed_size,))
-        label = Input(shape=(1,), dtype='int32')
+        label = Input(shape=(None, 40), dtype='int32')
 
         # Latent Input vector Z
         label_embeddings = Flatten()(Embedding(self.num_classes, self.latent_size)(label))
@@ -168,14 +156,17 @@ class CGAN:
         model.summary()
 
         input_image = Input(shape=input_shape)
-        label = Input(shape=(1,))
+        label = Input(shape=(None, 40))
 
-        label_embeddings = Flatten()(Embedding(self.num_classes, np.prod(self.shape))(label))
-        flat_image = Flatten()(input_image)
+        ######
+        #label_embeddings = Flatten()(Embedding(self.num_classes, np.prod(self.shape))(label))
+        #flat_image = Flatten()(input_image)
 
-        model_input = multiply([flat_image, label_embeddings])
+        ##
+        model_input = multiply([input_image, label]) # [flat_image, label_embeddings]
         model_input = Reshape((64, 64, 3))(model_input)
 
+        #####
         validity = model(model_input)
 
         return Model([input_image, label], validity)
@@ -230,10 +221,6 @@ class CGAN:
 
 
     def train(self, epochs=10000, batch_size=128, save_freq=200):
-        data_dir = '/Users/nicolafranco/PycharmProjects/GANs/celeba-dataset/small_image_set/'
-        #data_dir = '/Users/nicolafranco/PycharmProjects/GANs/celeba-dataset/img_align_celeba/img_align_celeba/'
-
-        filepaths = os.listdir(data_dir)
 
         seed_size = self.latent_size
         half_batch = int(batch_size / 2)
@@ -242,7 +229,7 @@ class CGAN:
         d_loss_logs_r = []
         d_loss_logs_f = []
         g_loss_logs = []
-        n_iterations = math.floor(len(filepaths) / batch_size)
+        n_iterations = math.floor(len(self.sample_path) / batch_size)
         #print_function(n_iterations)
 
         for epoch in range(epochs):
@@ -252,7 +239,7 @@ class CGAN:
             # Select a random half batch of images
             for ite in range(n_iterations):
 
-                X_train = self.get_batch(glob(os.path.join(data_dir, '*.jpg'))
+                X_train = self.get_batch(glob(os.path.join(self.sample_path, '*.jpg'))
                                          [ite * batch_size:(ite + 1) * batch_size], 64, 64, 'RGB')
 
                 # Normalizing this way
@@ -265,13 +252,20 @@ class CGAN:
                 imgs = X_train[idx]
                 noise = np.random.normal(0, 1, size=[half_batch, seed_size])
 
-                y = np.array([1] * half_batch)
-                print("y: ", y)
-                X_fake = self.generator.predict([noise, y])
+
+                labels = self.land_marks.iloc[ite * half_batch: (ite + 1) * half_batch, 1:]
+
+                labels = np.asarray(labels)
+                labels = labels.astype('float').reshape(-1, 1)
+                print(labels)
+
+                attributes = np.array([1] * half_batch)
+                print("attribute: ", attributes)
+                X_fake = self.generator.predict([noise, attributes])
 
                 # Train Disciminator
-                d_loss_real = self.discriminator.train_on_batch([imgs, y], np.ones((half_batch, 1)))
-                d_loss_fake = self.discriminator.train_on_batch([X_fake, y], np.zeros((half_batch, 1)))
+                d_loss_real = self.discriminator.train_on_batch([imgs, attributes], np.ones((half_batch, 1)))
+                d_loss_fake = self.discriminator.train_on_batch([X_fake, attributes], np.zeros((half_batch, 1)))
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # Train Generator
